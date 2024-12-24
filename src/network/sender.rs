@@ -69,7 +69,7 @@ pub async fn start_sending(
         // Set IPv4 fields
         ip_packet.set_version(4);
         ip_packet.set_header_length(5);
-        ip_packet.set_total_length(max_packet_size as u16);
+        ip_packet.set_total_length(max_packet_size);
         ip_packet.set_ttl(64);
         ip_packet.set_next_level_protocol(pnet::packet::ip::IpNextHeaderProtocols::Udp);
         ip_packet.set_source(src_ip);
