@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
-pub async fn start_listener(port: u16, received_counter: Arc<AtomicUsize>) {
+pub async fn start_listener(port: u16, received_counter: Arc<AtomicU64>) {
     let addr = format!("0.0.0.0:{}", port);
     let socket = UdpSocket::bind(addr)
         .await

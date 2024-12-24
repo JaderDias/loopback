@@ -2,9 +2,8 @@ mod config;
 mod network;
 
 use dotenvy::dotenv;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::time::{self, Duration};
 
 #[tokio::main]
 async fn main() {
@@ -12,8 +11,8 @@ async fn main() {
     let config = config::load();
 
     // Global counters
-    let sent_counter = Arc::new(AtomicUsize::new(0));
-    let received_counter = Arc::new(AtomicUsize::new(0));
+    let sent_counter = Arc::new(AtomicU64::new(0));
+    let received_counter = Arc::new(AtomicU64::new(0));
 
     // Spawn the network listener
     let received_counter_clone = Arc::clone(&received_counter);
@@ -29,6 +28,7 @@ async fn main() {
             config.public_ip_address,
             config.listen_port,
             config.min_payload_size,
+            config.max_payload_size,
             config.interval_millis,
             sent_counter_clone,
         )
