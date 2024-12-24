@@ -1,7 +1,18 @@
 use pnet::datalink;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::{self, Duration};
 
-pub fn create_socket(interface_name: String) -> UdpSocket {
+pub async fn start_sending(
+    interface_name: String,
+    target_ip: String,
+    port: u16,
+    min_payload: usize,
+    interval_millis: u64,
+    sent_counter: Arc<AtomicUsize>,
+) {
     // Find the specified network interface
     let interfaces = datalink::interfaces();
     let interface = interfaces
@@ -20,17 +31,33 @@ pub fn create_socket(interface_name: String) -> UdpSocket {
         None => panic!("Interface has no associated IPs"),
     };
 
-    UdpSocket::bind(SocketAddr::new(bind_addr, 0)).expect("Failed to bind UDP socket to interface")
-}
+    let socket = UdpSocket::bind(SocketAddr::new(bind_addr, 0))
+        .expect("Failed to bind UDP socket to interface");
 
-pub fn send(socket: &UdpSocket, target_ip: &str, port: u16, min_payload: usize) {
+    println!(
+        "Bound UDP socket to {}. Sending packets to {}...",
+        bind_addr, target_ip
+    );
+
     let target_ip: Ipv4Addr = target_ip.parse().expect("Invalid target IP");
-    let target_addr = SocketAddr::new(target_ip.into(), port); // Target port is hardcoded for now
-    let payload_size = min_payload;
-    let payload = vec![0u8; payload_size];
+    let target_addr = SocketAddr::new(target_ip.into(), port);
 
-    match socket.send_to(&payload, target_addr) {
-        Ok(size) => println!("Sent {} bytes to {}", size, target_addr),
-        Err(e) => eprintln!("Failed to send packet: {}", e),
+    let mut interval = time::interval(Duration::from_millis(interval_millis));
+
+    loop {
+        interval.tick().await;
+
+        // Generate packet content
+        let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+        let payload = format!("Counter: {}, Timestamp: {}", counter, timestamp);
+
+        match socket.send_to(payload.as_bytes(), target_addr) {
+            Ok(size) => println!("Sent {} bytes to {}", size, target_addr),
+            Err(e) => eprintln!("Failed to send packet: {}", e),
+        }
     }
 }
