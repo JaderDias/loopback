@@ -2,12 +2,13 @@ use std::env;
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub public_ip_address: String,
     pub alternative_interface: String,
+    pub interval_millis: u64,
     pub max_packet_size: u16,
     pub min_packet_size: u16,
-    pub interval_millis: u64,
-    pub listen_port: u16,
+    pub public_ip_address: String,
+    pub target_port: u16,
+    pub web_port: u16,
 }
 
 pub fn load() -> Config {
@@ -27,9 +28,13 @@ pub fn load() -> Config {
             .expect("INTERVAL_MILLIS must be set")
             .parse()
             .expect("INTERVAL_MILLIS must be a number"),
-        listen_port: env::var("LISTEN_PORT")
-            .expect("LISTEN_PORT must be set")
+        target_port: env::var("TARGET_PORT")
+            .expect("TARGET_PORT must be set")
             .parse()
-            .expect("LISTEN_PORT must be a number"),
+            .expect("TARGET_PORT must be a number"),
+        web_port: env::var("WEB_PORT")
+            .expect("WEB_PORT must be set")
+            .parse()
+            .expect("WEB_PORT must be a number"),
     }
 }

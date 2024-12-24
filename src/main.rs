@@ -1,5 +1,6 @@
 mod config;
 mod network;
+mod web;
 
 use dotenvy::dotenv;
 use std::collections::VecDeque;
@@ -22,7 +23,7 @@ async fn main() {
         let history_clone = Arc::clone(&history);
         tokio::spawn(async move {
             network::listener::start_listener(
-                config.listen_port,
+                config.target_port,
                 sent_counter_clone,
                 history_clone,
             )
@@ -31,20 +32,27 @@ async fn main() {
     }
 
     // Spawn the network sender
-    let sent_counter_clone = Arc::clone(&sent_counter);
+    {
+        let sent_counter_clone = Arc::clone(&sent_counter);
+        let history_clone = Arc::clone(&history);
+        tokio::spawn(async move {
+            network::sender::start_sending(
+                config.alternative_interface,
+                config.public_ip_address,
+                config.target_port,
+                config.min_packet_size,
+                config.max_packet_size,
+                config.interval_millis,
+                sent_counter_clone,
+                history_clone,
+            )
+            .await;
+        });
+    }
+
     let history_clone = Arc::clone(&history);
     tokio::spawn(async move {
-        network::sender::start_sending(
-            config.alternative_interface,
-            config.public_ip_address,
-            config.listen_port,
-            config.min_packet_size,
-            config.max_packet_size,
-            config.interval_millis,
-            sent_counter_clone,
-            history_clone,
-        )
-        .await;
+        web::serve(config.web_port, history_clone, config.interval_millis).await;
     });
 
     println!("Program is running. Press Ctrl+C to stop.");
