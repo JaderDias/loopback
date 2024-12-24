@@ -27,8 +27,8 @@ async fn main() {
             config.alternative_interface,
             config.public_ip_address,
             config.listen_port,
-            config.min_payload_size,
-            config.max_payload_size,
+            config.min_packet_size,
+            config.max_packet_size,
             config.interval_millis,
             sent_counter_clone,
         )
