@@ -2,8 +2,10 @@ mod config;
 mod network;
 
 use dotenvy::dotenv;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -12,16 +14,25 @@ async fn main() {
 
     // Global counters
     let sent_counter = Arc::new(AtomicU64::new(0));
-    let received_counter = Arc::new(AtomicU64::new(0));
+    let history = Arc::new(Mutex::new(VecDeque::new()));
 
     // Spawn the network listener
-    let received_counter_clone = Arc::clone(&received_counter);
-    tokio::spawn(async move {
-        network::listener::start_listener(config.listen_port, received_counter_clone).await;
-    });
+    {
+        let sent_counter_clone = Arc::clone(&sent_counter);
+        let history_clone = Arc::clone(&history);
+        tokio::spawn(async move {
+            network::listener::start_listener(
+                config.listen_port,
+                sent_counter_clone,
+                history_clone,
+            )
+            .await;
+        });
+    }
 
     // Spawn the network sender
     let sent_counter_clone = Arc::clone(&sent_counter);
+    let history_clone = Arc::clone(&history);
     tokio::spawn(async move {
         network::sender::start_sending(
             config.alternative_interface,
@@ -31,6 +42,7 @@ async fn main() {
             config.max_packet_size,
             config.interval_millis,
             sent_counter_clone,
+            history_clone,
         )
         .await;
     });
@@ -46,9 +58,5 @@ async fn main() {
     println!(
         "Total packets sent: {}",
         sent_counter.load(Ordering::Relaxed)
-    );
-    println!(
-        "Total packets received: {}",
-        received_counter.load(Ordering::Relaxed)
     );
 }

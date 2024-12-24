@@ -3,11 +3,13 @@ use pnet::datalink;
 use pnet::packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
 use pnet::packet::udp::MutableUdpPacket;
 use pnet::packet::MutablePacket;
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 
 pub async fn start_sending(
@@ -18,8 +20,8 @@ pub async fn start_sending(
     max_packet_size: u16,
     interval_millis: u64,
     sent_counter: Arc<AtomicU64>,
+    history: Arc<Mutex<VecDeque<u64>>>,
 ) {
-    // Find the specified network interface
     let interfaces = datalink::interfaces();
     let interface = interfaces
         .into_iter()
@@ -51,11 +53,22 @@ pub async fn start_sending(
     .expect("Failed to create transport channel");
 
     let mut interval = time::interval(Duration::from_millis(interval_millis));
+    const MAX_QUEUE_SIZE: usize = 1000; // Maximum size of unacknowledged packet queue
+    const MAX_LATENCY_MILLIS: u64 = 1000;
 
     loop {
         interval.tick().await;
+        {
+            // Add the packet to the unacknowledged queue
+            let mut queue = history.lock().await;
+            if queue.len() >= MAX_QUEUE_SIZE {
+                queue.pop_front(); // Discard the oldest entry if the queue is full
+            }
 
-        // Generate packet content
+            dbg!(&queue);
+            queue.push_back(MAX_LATENCY_MILLIS);
+        }
+
         let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
