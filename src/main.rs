@@ -36,19 +36,9 @@ async fn main() {
     {
         let sent_counter_clone = Arc::clone(&sent_counter);
         let history_clone = Arc::clone(&history);
+        let config = config.clone();
         tokio::spawn(async move {
-            network::sender::start_sending(
-                config.alternative_interface,
-                config.public_ip_address,
-                config.target_port,
-                config.min_packet_size,
-                config.max_packet_size,
-                config.max_queue_size,
-                config.interval_millis,
-                sent_counter_clone,
-                history_clone,
-            )
-            .await;
+            network::sender::start_sending(&config, sent_counter_clone, history_clone).await;
         });
     }
 
