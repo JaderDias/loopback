@@ -48,7 +48,7 @@ pub async fn start_sending(
     .expect("Failed to create transport channel");
 
     let mut interval = time::interval(Duration::from_millis(config.interval_millis));
-    const MAX_LATENCY_MILLIS: u64 = 1000;
+    const MAX_LATENCY_MICROS: u64 = 1_000_000;
 
     loop {
         interval.tick().await;
@@ -63,7 +63,7 @@ pub async fn start_sending(
                 queue.pop_front(); // Discard the oldest entry if the queue is full
             }
 
-            queue.push_back((timestamp, MAX_LATENCY_MILLIS));
+            queue.push_back((timestamp, MAX_LATENCY_MICROS));
         }
 
         let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
