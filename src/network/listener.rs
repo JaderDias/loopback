@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 pub async fn start_listener(
     port: u16,
     sent_counter: Arc<AtomicU64>,
-    history: Arc<Mutex<VecDeque<u64>>>,
+    history: Arc<Mutex<VecDeque<crate::model::Result>>>,
 ) {
     let addr = format!("0.0.0.0:{}", port);
     let socket = UdpSocket::bind(addr)
@@ -19,7 +19,7 @@ pub async fn start_listener(
 
     let mut buf = [0; 2048];
     loop {
-        let (size, src) = socket
+        let (size, _) = socket
             .recv_from(&mut buf)
             .await
             .expect("Failed to receive packet");
@@ -35,21 +35,16 @@ pub async fn start_listener(
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
-            .as_millis();
+            .as_micros();
         let time_diff = now as i128 - timestamp as i128;
 
         // Remove the packet from the unacknowledged queue
         {
             let mut queue = history.lock().await;
             let index = queue.len() - age;
-            if let Some(latency) = queue.get_mut(index) {
-                *latency = time_diff as u64;
+            if let Some(result) = queue.get_mut(index) {
+                *result = (timestamp, time_diff as u64)
             }
         }
-
-        println!(
-            "Received packet from {}: Counter = {}, Timestamp = {}, Time Difference = {} ms",
-            src, counter, timestamp, time_diff
-        );
     }
 }

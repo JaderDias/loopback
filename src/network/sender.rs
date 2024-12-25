@@ -20,7 +20,7 @@ pub async fn start_sending(
     max_packet_size: u16,
     interval_millis: u64,
     sent_counter: Arc<AtomicU64>,
-    history: Arc<Mutex<VecDeque<u64>>>,
+    history: Arc<Mutex<VecDeque<crate::model::Result>>>,
 ) {
     let interfaces = datalink::interfaces();
     let interface = interfaces
@@ -58,6 +58,10 @@ pub async fn start_sending(
 
     loop {
         interval.tick().await;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_micros();
         {
             // Add the packet to the unacknowledged queue
             let mut queue = history.lock().await;
@@ -65,15 +69,10 @@ pub async fn start_sending(
                 queue.pop_front(); // Discard the oldest entry if the queue is full
             }
 
-            dbg!(&queue);
-            queue.push_back(MAX_LATENCY_MILLIS);
+            queue.push_back((timestamp, MAX_LATENCY_MILLIS));
         }
 
         let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis();
 
         let mut buffer = vec![0u8; max_packet_size.into()];
 
@@ -109,13 +108,11 @@ pub async fn start_sending(
         ));
 
         // Send the entire IPv4 packet
-        match tx.send_to(ip_packet, IpAddr::V4(target_ip)) {
-            Ok(_) => println!(
-                "Sent packet {} with {} bytes to {}:{}",
-                counter, max_packet_size, target_ip, port
-            ),
-            Err(e) => eprintln!("Failed to send packet: {}", e),
-        }
+        tx.send_to(ip_packet, IpAddr::V4(target_ip))
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to send packet: {}", e);
+                0
+            });
     }
 }
 

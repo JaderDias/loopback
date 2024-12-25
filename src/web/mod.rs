@@ -1,11 +1,14 @@
+mod data;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warp::Filter;
 
-pub async fn serve(port: u16, history: Arc<Mutex<VecDeque<u64>>>, interval_millis: u64) {
+pub async fn serve(port: u16, history: Arc<Mutex<VecDeque<crate::model::Result>>>) {
     let report_route = warp::path::end()
         .and_then(move || {
+let history = history.clone();
             async move {
                 let mut html = String::from("<html>
       <head>
@@ -15,13 +18,13 @@ pub async fn serve(port: u16, history: Arc<Mutex<VecDeque<u64>>>, interval_milli
           google.charts.setOnLoadCallback(drawChart);
           function drawChart() {");
 
-                let rows1 = String::new();
+                let rows1 = data::group_by(history).await;
 
                 // Prepare the column definitions
                 let mut columns1 = String::from("data1.addColumn('date', 'Date');\n");
-                    columns1.push_str(&format!(
-                        "data1.addColumn('number', '1');\n",
-                    ));
+	    columns1.push_str("data1.addColumn('number', 'min');\n");
+	    columns1.push_str("data1.addColumn('number', 'max');\n");
+	    columns1.push_str("data1.addColumn('number', 'median');\n");
                 html = format!(r#"{html}
                  var data1 = new google.visualization.DataTable();
             {columns1}

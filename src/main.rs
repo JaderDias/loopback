@@ -1,4 +1,5 @@
 mod config;
+mod model;
 mod network;
 mod web;
 
@@ -52,7 +53,7 @@ async fn main() {
 
     let history_clone = Arc::clone(&history);
     tokio::spawn(async move {
-        web::serve(config.web_port, history_clone, config.interval_millis).await;
+        web::serve(config.web_port, history_clone).await;
     });
 
     println!("Program is running. Press Ctrl+C to stop.");
