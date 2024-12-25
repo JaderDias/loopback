@@ -43,6 +43,7 @@ async fn main() {
                 config.target_port,
                 config.min_packet_size,
                 config.max_packet_size,
+                config.max_queue_size,
                 config.interval_millis,
                 sent_counter_clone,
                 history_clone,

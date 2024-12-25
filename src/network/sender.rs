@@ -18,6 +18,7 @@ pub async fn start_sending(
     port: u16,
     min_packet_size: u16,
     max_packet_size: u16,
+    max_queue_size: usize,
     interval_millis: u64,
     sent_counter: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<crate::model::Result>>>,
@@ -53,7 +54,6 @@ pub async fn start_sending(
     .expect("Failed to create transport channel");
 
     let mut interval = time::interval(Duration::from_millis(interval_millis));
-    const MAX_QUEUE_SIZE: usize = 1000; // Maximum size of unacknowledged packet queue
     const MAX_LATENCY_MILLIS: u64 = 1000;
 
     loop {
@@ -65,7 +65,7 @@ pub async fn start_sending(
         {
             // Add the packet to the unacknowledged queue
             let mut queue = history.lock().await;
-            if queue.len() >= MAX_QUEUE_SIZE {
+            if queue.len() >= max_queue_size {
                 queue.pop_front(); // Discard the oldest entry if the queue is full
             }
 
