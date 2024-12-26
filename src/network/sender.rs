@@ -1,11 +1,8 @@
 use byteorder::{BigEndian, WriteBytesExt}; // Add this crate for binary data serialization
 use pnet::datalink;
-use pnet::packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
-use pnet::packet::udp::MutableUdpPacket;
-use pnet::packet::MutablePacket;
 use std::collections::VecDeque;
 use std::io::Cursor;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -37,18 +34,35 @@ pub async fn start_sending(
         None => panic!("Interface has no associated IPs"),
     };
 
-    let target_ip: Ipv4Addr = config.public_ip_address.parse().expect("Invalid target IP");
-    let buffer_size: usize = 65535;
-
-    // Create a raw socket
-    let (mut tx, _) = pnet::transport::transport_channel(
-        buffer_size,
-        pnet::transport::TransportChannelType::Layer3(pnet::packet::ip::IpNextHeaderProtocols::Udp),
-    )
-    .expect("Failed to create transport channel");
-
     let mut interval = time::interval(Duration::from_millis(config.interval_millis));
     const MAX_LATENCY_MICROS: u64 = 1_000_000;
+
+    use libc::{IP_MTU_DISCOVER, IP_PMTUDISC_DO};
+    use std::net::UdpSocket;
+    use std::os::unix::io::AsRawFd;
+
+    let src = format!("{src_ip}:0");
+    let socket = UdpSocket::bind(&src).expect("failed to bind");
+    let fd = socket.as_raw_fd();
+
+    unsafe {
+        let optval: libc::c_int = IP_PMTUDISC_DO;
+        let result = libc::setsockopt(
+            fd,
+            libc::IPPROTO_IP,
+            IP_MTU_DISCOVER,
+            &optval as *const _ as *const libc::c_void,
+            std::mem::size_of_val(&optval) as libc::socklen_t,
+        );
+        if result != 0 {
+            eprintln!(
+                "Failed to set IP_MTU_DISCOVER: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+
+    let address = format!("{}:{}", config.public_ip_address, config.target_port);
 
     loop {
         interval.tick().await;
@@ -68,53 +82,16 @@ pub async fn start_sending(
 
         let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
 
-        let mut buffer = vec![0u8; config.max_packet_size.into()];
-
-        let mut ip_packet = MutableIpv4Packet::new(&mut buffer).unwrap();
-
-        // Set IPv4 fields
-        ip_packet.set_version(4);
-        ip_packet.set_header_length(5);
-        ip_packet.set_total_length(config.max_packet_size);
-        ip_packet.set_ttl(64);
-        ip_packet.set_next_level_protocol(pnet::packet::ip::IpNextHeaderProtocols::Udp);
-        ip_packet.set_source(src_ip);
-        ip_packet.set_destination(target_ip);
-        ip_packet.set_flags(Ipv4Flags::DontFragment);
-
-        // Compute checksums
-        ip_packet.set_checksum(pnet::packet::ipv4::checksum(&ip_packet.to_immutable()));
-
-        let payload = get_payload(counter, timestamp);
-
-        let mut udp_packet = MutableUdpPacket::new(ip_packet.payload_mut()).unwrap();
-
-        udp_packet.set_source(12345); // Arbitrary source port
-        udp_packet.set_destination(config.target_port); // Set the target port
-        udp_packet
-            .set_length(config.max_packet_size - MutableIpv4Packet::minimum_packet_size() as u16);
-        udp_packet.set_payload(&payload);
-
-        // Calculate and set the UDP checksum
-        udp_packet.set_checksum(pnet::packet::udp::ipv4_checksum(
-            &udp_packet.to_immutable(),
-            &src_ip,
-            &target_ip,
-        ));
-
-        // Send the entire IPv4 packet
-        tx.send_to(ip_packet, IpAddr::V4(target_ip))
-            .unwrap_or_else(|e| {
-                eprintln!("Failed to send packet: {}", e);
-                0
-            });
+        let payload = get_payload(counter, timestamp, config.max_packet_size);
+        socket.send_to(&payload, &address).unwrap_or_else(|e| {
+            eprintln!("Failed to send packet: {}", e);
+            0
+        });
     }
 }
 
-const PAYLOAD_SIZE: usize = 192;
-
-fn get_payload(counter: u64, timestamp: u128) -> Vec<u8> {
-    let mut payload = vec![0u8; PAYLOAD_SIZE]; // Initialize a buffer with zero padding
+fn get_payload(counter: u64, timestamp: u128, size: usize) -> Vec<u8> {
+    let mut payload = vec![0u8; size]; // Initialize a buffer with zero padding
 
     // Write counter and timestamp into the buffer
     let mut cursor = Cursor::new(&mut payload);

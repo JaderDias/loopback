@@ -4,9 +4,8 @@ use std::env;
 pub struct Config {
     pub alternative_interface: String,
     pub interval_millis: u64,
-    pub max_packet_size: u16,
+    pub max_packet_size: usize,
     pub max_queue_size: usize,
-    pub min_packet_size: u16,
     pub public_ip_address: String,
     pub target_port: u16,
     pub web_port: u16,
@@ -25,10 +24,6 @@ pub fn load() -> Config {
             .expect("MAX_QUEUE_SIZE must be set")
             .parse()
             .expect("MAX_QUEUE_SIZE must be a number"),
-        min_packet_size: env::var("MIN_PACKET_SIZE")
-            .expect("MIN_PACKET_SIZE must be set")
-            .parse()
-            .expect("MIN_PACKET_SIZE must be a number"),
         interval_millis: env::var("INTERVAL_MILLIS")
             .expect("INTERVAL_MILLIS must be set")
             .parse()
