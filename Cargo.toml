@@ -10,4 +10,5 @@ dotenvy = "0.15.7"
 libc = "0.2.169"
 pnet = "0.35.0"
 tokio = { version = "1.42.0", features = ["full"] }
+surge-ping = "0.8"
 warp = "0.3.7"
