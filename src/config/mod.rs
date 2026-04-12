@@ -44,6 +44,22 @@ impl Config {
     }
 }
 
+const VPN_PORT_FILE: &str = "/var/lib/loopback/vpn_port";
+
+/// Read the target port from the NAT-PMP assigned port file, falling back to
+/// the TARGET_PORT env var for setups that don't use NAT-PMP.
+fn read_target_port() -> u16 {
+    if let Ok(s) = std::fs::read_to_string(VPN_PORT_FILE) {
+        if let Ok(p) = s.trim().parse::<u16>() {
+            return p;
+        }
+    }
+    env::var("TARGET_PORT")
+        .expect("TARGET_PORT must be set (or vpn_port file must exist)")
+        .parse()
+        .expect("TARGET_PORT must be a number")
+}
+
 pub fn load() -> Config {
     let ping_targets = env::var("PING_TARGET")
         .unwrap_or_else(|_| "1.1.1.1".to_string())
@@ -82,10 +98,7 @@ pub fn load() -> Config {
             .expect("INTERVAL_MILLIS must be set")
             .parse()
             .expect("INTERVAL_MILLIS must be a number"),
-        target_port: env::var("TARGET_PORT")
-            .expect("TARGET_PORT must be set")
-            .parse()
-            .expect("TARGET_PORT must be a number"),
+        target_port: read_target_port(),
         web_port: env::var("WEB_PORT")
             .expect("WEB_PORT must be set")
             .parse()
