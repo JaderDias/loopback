@@ -58,7 +58,10 @@ pub fn load() -> Config {
         ping_data_file: env::var("PING_DATA_FILE")
             .unwrap_or_else(|_| "/var/lib/loopback/ping_data.bin".to_string()),
         ping_targets,
-        alternative_interface: env::var("ALTERNATIVE_INTERFACE").ok().filter(|s| !s.is_empty()),
+        alternative_interface: Some(
+            env::var("ALTERNATIVE_INTERFACE").unwrap_or_else(|_| "wgproton".to_string()),
+        )
+        .filter(|s| !s.is_empty()),
         min_mtu: env::var("MIN_MTU")
             .ok()
             .and_then(|v| v.parse().ok())
