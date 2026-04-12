@@ -36,6 +36,7 @@ cd "$SCRIPT_DIR"
 cargo build --release
 systemctl --user stop loopback 2>/dev/null || true
 cp target/release/loopback "$OPT_DIR/loopback"
+sudo setcap cap_net_raw+ep "$OPT_DIR/loopback"
 
 # ── WireGuard config ───────────────────────────────────────────────────────────
 sudo mkdir -p /etc/wireguard
