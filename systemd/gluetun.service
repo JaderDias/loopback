@@ -1,0 +1,11 @@
+[Unit]
+Description=Gluetun VPN container (ProtonVPN WireGuard + port forwarding)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=always
+ExecStart=%h/loopback/gluetun-run.sh
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for VPN port forwarding assignment
+
+[Path]
+PathChanged=/var/lib/loopback/vpn_port
+
+[Install]
+WantedBy=default.target
