@@ -1,7 +1,6 @@
 [Unit]
 Description=ProtonVPN port forwarding renewal (NAT-PMP)
-After=wg-quick@wgproton.service
-Requires=wg-quick@wgproton.service
+After=network.target
 
 [Service]
 Restart=always

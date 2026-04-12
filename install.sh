@@ -37,6 +37,12 @@ cargo build --release
 systemctl --user stop loopback 2>/dev/null || true
 cp target/release/loopback "$OPT_DIR/loopback"
 
+# ── WireGuard config ───────────────────────────────────────────────────────────
+sudo mkdir -p /etc/wireguard
+sudo cp "$SCRIPT_DIR/wgproton.conf" /etc/wireguard/wgproton.conf
+sudo chmod 600 /etc/wireguard/wgproton.conf
+sudo systemctl enable wg-quick@wgproton
+
 # ── Scripts ────────────────────────────────────────────────────────────────────
 chmod +x "$SCRIPT_DIR/protonvpn-portforward.sh"
 chmod +x "$SCRIPT_DIR/update-loopback-port.sh"

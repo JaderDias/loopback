@@ -17,47 +17,35 @@ pub async fn start_sending(
     sent_counter: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<Packet>>>,
 ) {
-    let bind_addr = match &config.alternative_interface {
-        Some(iface_name) => {
-            let interfaces = datalink::interfaces();
-            match interfaces.into_iter().find(|iface| &iface.name == iface_name) {
-                Some(iface) => match iface.ips.first() {
-                    Some(ip) => match ip.ip() {
-                        IpAddr::V4(v4) => {
-                            println!("Using interface: {} ({})", iface_name, v4);
-                            format!("{}:0", v4)
-                        }
-                        _ => {
-                            eprintln!(
-                                "Interface '{}' has no IPv4 address (loopback sender disabled).",
-                                iface_name
-                            );
-                            return;
-                        }
-                    },
-                    None => {
-                        eprintln!(
-                            "Interface '{}' has no IPs (loopback sender disabled).",
-                            iface_name
-                        );
-                        return;
-                    }
-                },
-                None => {
-                    eprintln!(
-                        "Interface '{}' not found (loopback sender disabled). \
-                         ICMP ping will continue as fallback.",
-                        iface_name
-                    );
-                    return;
-                }
+    // When ALTERNATIVE_INTERFACE is set, verify the VPN is up (port forwarding requires it),
+    // but always egress via the default route (eth0 → internet → VPN server NAT-PMP →
+    // back through the VPN tunnel → listener). Binding to the VPN IP would make packets
+    // travel through the tunnel to the server, which does not hairpin them back.
+    if let Some(iface_name) = &config.alternative_interface {
+        let interfaces = datalink::interfaces();
+        match interfaces.into_iter().find(|iface| &iface.name == iface_name) {
+            Some(iface) => {
+                let ip_str = iface
+                    .ips
+                    .iter()
+                    .find_map(|ip| match ip.ip() {
+                        IpAddr::V4(v4) => Some(v4.to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "?".to_string());
+                println!("VPN interface {} ({}) is up; sender will egress via default route.", iface_name, ip_str);
+            }
+            None => {
+                eprintln!(
+                    "Interface '{}' not found (loopback sender disabled). \
+                     ICMP ping will continue as fallback.",
+                    iface_name
+                );
+                return;
             }
         }
-        None => {
-            println!("No ALTERNATIVE_INTERFACE set, binding loopback sender to 0.0.0.0");
-            "0.0.0.0:0".to_string()
-        }
-    };
+    }
+    let bind_addr = "0.0.0.0:0".to_string();
 
     use libc::{IP_MTU_DISCOVER, IP_PMTUDISC_DO};
     use std::net::UdpSocket;
