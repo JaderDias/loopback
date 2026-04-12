@@ -25,5 +25,6 @@ exec podman run --rm \
     --sysctl net.ipv4.conf.all.src_valid_mark=1 \
     --volume gluetun:/gluetun \
     --volume /var/lib/loopback:/var/lib/loopback \
+    --publish 127.0.0.1:8000:8000 \
     --env-file "$ENV_FILE" \
     qmcgaw/gluetun:latest
