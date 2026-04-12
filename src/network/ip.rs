@@ -1,5 +1,7 @@
+use pnet::datalink;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::TcpSocket;
 
 const SERVICES: &[(&str, &str, &str)] = &[
     ("api.ipify.org:80", "api.ipify.org", "GET / HTTP/1.0\r\nHost: api.ipify.org\r\n\r\n"),
@@ -7,15 +9,26 @@ const SERVICES: &[(&str, &str, &str)] = &[
     ("icanhazip.com:80", "icanhazip.com", "GET / HTTP/1.0\r\nHost: icanhazip.com\r\n\r\n"),
 ];
 
-pub async fn discover() -> Option<String> {
-    // Prefer gluetun's control server — it returns the VPN exit IP directly.
-    if let Some(ip) = try_gluetun().await {
-        println!("Public IP: {} (from gluetun)", ip);
-        return Some(ip);
-    }
+/// Resolve the first IPv4 address of a named network interface.
+fn interface_ipv4(name: &str) -> Option<Ipv4Addr> {
+    datalink::interfaces()
+        .into_iter()
+        .find(|i| i.name == name)?
+        .ips
+        .into_iter()
+        .find_map(|ip| match ip.ip() {
+            IpAddr::V4(v4) if !v4.is_loopback() => Some(v4),
+            _ => None,
+        })
+}
+
+/// Discover our public IP, binding outbound connections to `iface` when given
+/// so that the result reflects the VPN exit IP rather than the ISP IP.
+pub async fn discover(iface: Option<&str>) -> Option<String> {
+    let bind_ip = iface.and_then(interface_ipv4);
 
     for (addr, host, request) in SERVICES {
-        match try_service(addr, request).await {
+        match try_service(addr, request, bind_ip).await {
             Some(ip) => {
                 println!("Public IP: {} (from {})", ip, host);
                 return Some(ip);
@@ -27,34 +40,14 @@ pub async fn discover() -> Option<String> {
     None
 }
 
-/// Query gluetun's HTTP control server (default port 8000).
-/// Response body is JSON: {"public_ip":"1.2.3.4", ...}
-async fn try_gluetun() -> Option<String> {
-    let request = "GET /v1/publicip/ip HTTP/1.0\r\nHost: 127.0.0.1:8000\r\n\r\n";
-    let mut stream = TcpStream::connect("127.0.0.1:8000").await.ok()?;
-    stream.write_all(request.as_bytes()).await.ok()?;
+async fn try_service(addr: &str, request: &str, bind_ip: Option<Ipv4Addr>) -> Option<String> {
+    let remote: SocketAddr = tokio::net::lookup_host(addr).await.ok()?.next()?;
 
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).await.ok()?;
-
-    let text = String::from_utf8_lossy(&response);
-    let body = text.split("\r\n\r\n").nth(1).unwrap_or(&text);
-
-    // Extract "public_ip":"VALUE" from JSON without a JSON library
-    let key = "\"public_ip\":\"";
-    let start = body.find(key)? + key.len();
-    let end = body[start..].find('"')? + start;
-    let ip = body[start..end].trim().to_string();
-
-    if ip.parse::<std::net::IpAddr>().is_ok() {
-        Some(ip)
-    } else {
-        None
+    let socket = TcpSocket::new_v4().ok()?;
+    if let Some(ip) = bind_ip {
+        socket.bind(SocketAddr::new(IpAddr::V4(ip), 0)).ok()?;
     }
-}
-
-async fn try_service(addr: &str, request: &str) -> Option<String> {
-    let mut stream = TcpStream::connect(addr).await.ok()?;
+    let mut stream = socket.connect(remote).await.ok()?;
     stream.write_all(request.as_bytes()).await.ok()?;
 
     let mut response = Vec::new();
@@ -64,7 +57,7 @@ async fn try_service(addr: &str, request: &str) -> Option<String> {
     let body = text.split("\r\n\r\n").nth(1).unwrap_or(&text);
     let ip = body.trim().to_string();
 
-    if ip.parse::<std::net::IpAddr>().is_ok() {
+    if ip.parse::<IpAddr>().is_ok() {
         Some(ip)
     } else {
         None

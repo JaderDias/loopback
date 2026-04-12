@@ -58,7 +58,7 @@ async fn main() {
         let loopback_mtu = Arc::clone(&loopback_mtu);
         let config = config.clone();
         tokio::spawn(async move {
-            match network::ip::discover().await {
+            match network::ip::discover(config.alternative_interface.as_deref()).await {
                 Some(public_ip) => {
                     // MTU probe runs in parallel with the sender
                     let bind_addr = if config.alternative_interface.is_some() {

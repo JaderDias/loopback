@@ -1,0 +1,13 @@
+[Unit]
+Description=ProtonVPN port forwarding renewal (NAT-PMP)
+After=wg-quick@wgproton.service
+Requires=wg-quick@wgproton.service
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStart=%h/loopback/protonvpn-portforward.sh
+Environment=PROTONVPN_GATEWAY=10.2.0.1
+
+[Install]
+WantedBy=default.target
