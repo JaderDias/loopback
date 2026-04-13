@@ -51,6 +51,41 @@ pub async fn start_probing_udp(
     }
 }
 
+/// Binary-search for the maximum fitting MTU in [min, max], stepping by 2 (even only).
+/// `probe` returns Some(true)=fits, Some(false)=too big, None=abort.
+fn binary_search_mtu(min: u32, max: u32, mut probe: impl FnMut(u32) -> Option<bool>) -> Option<u32> {
+    let mut lo = (min + 1) & !1; // round up to even
+    let mut hi = max & !1;       // round down to even
+    let mut result = None;
+    while lo <= hi {
+        let mid = ((lo + hi) / 2) & !1;
+        match probe(mid) {
+            Some(true)  => { result = Some(mid); lo = mid + 2; }
+            Some(false) => { hi = mid.saturating_sub(2); }
+            None        => break,
+        }
+    }
+    result
+}
+
+/// Try special well-known MTU values before falling back to binary search.
+/// Order: 9000 (jumbo) → 1472 → 1512 → binary search in remaining range.
+fn probe_mtu(min: u32, max: u32, mut probe: impl FnMut(u32) -> Option<bool>) -> Option<u32> {
+    if matches!(probe(9000), Some(true)) {
+        return Some(9000);
+    }
+    match probe(1472) {
+        None        => return None,
+        Some(false) => return binary_search_mtu(min, 1470, probe),
+        Some(true)  => {}
+    }
+    let upper = max & !1;
+    match probe(1512) {
+        Some(true) => Some(1512),
+        _          => binary_search_mtu(1474, upper.min(1510), &mut probe).or(Some(1472)),
+    }
+}
+
 fn probe_udp_blocking(bind_addr: &str, address: &str, min: u32, max: u32) -> Option<u32> {
     use libc::{IP_MTU_DISCOVER, IP_PMTUDISC_DO};
     use std::os::unix::io::AsRawFd;
@@ -68,32 +103,16 @@ fn probe_udp_blocking(bind_addr: &str, address: &str, min: u32, max: u32) -> Opt
         );
     }
 
-    let mut lo = min;
-    let mut hi = max;
-    let mut result = None;
-
-    while lo <= hi {
-        let mid = (lo + hi) / 2;
-        let payload = vec![0u8; mid as usize];
-
-        // First send: may go through and trigger ICMP frag-needed from a router
+    probe_mtu(min, max, |size| {
+        let payload = vec![0u8; size as usize];
         let _ = socket.send_to(&payload, address);
-        // Brief pause for the kernel to process any ICMP response
         std::thread::sleep(Duration::from_millis(80));
-        // Second send: kernel now knows if this size exceeds the path MTU
         match socket.send_to(&payload, address) {
-            Ok(_) => {
-                result = Some(mid);
-                lo = mid + 1;
-            }
-            Err(e) if e.raw_os_error() == Some(libc::EMSGSIZE) => {
-                hi = mid - 1;
-            }
-            Err(_) => break,
+            Ok(_)                                              => Some(true),
+            Err(e) if e.raw_os_error() == Some(libc::EMSGSIZE) => Some(false),
+            Err(_)                                             => None,
         }
-    }
-
-    result
+    })
 }
 
 // ── ICMP MTU (raw socket with IP_PMTUDISC_DO, binary search) ──────────────────
@@ -142,8 +161,8 @@ pub async fn start_probing_icmp(
         .await
         .unwrap_or(None);
 
-        // Advance seq by enough to clear all probes (log2(max-min)+1 ≤ 12)
-        seq = seq.wrapping_add(12);
+        // Advance seq past all probes used this round (3 special + ~13 binary = 20)
+        seq = seq.wrapping_add(20);
 
         if let Some(mtu) = result {
             println!("ICMP MTU probe {}: {} bytes", target, mtu);
@@ -180,43 +199,22 @@ fn probe_icmp_blocking(ip: Ipv4Addr, min: u32, max: u32, seq_base: u16) -> Optio
 
     let dest = socket2::SockAddr::from(SocketAddrV4::new(ip, 0));
     const IDENT: u16 = 0xF00D;
-    let mut lo = min;
-    let mut hi = max;
-    let mut result = None;
     let mut seq = seq_base;
+    let mut buf = [MaybeUninit::uninit(); 2048];
 
-    while lo <= hi {
-        let mid = (lo + hi) / 2;
+    probe_mtu(min, max, |size| {
         seq = seq.wrapping_add(1);
-
-        let packet = build_icmp_echo(IDENT, seq, mid);
-
-        // First send: prime the kernel's PMTU cache
+        let packet = build_icmp_echo(IDENT, seq, size);
         let _ = socket.send_to(&packet, &dest);
         std::thread::sleep(Duration::from_millis(80));
-
-        // Second send: definitive answer
         match socket.send_to(&packet, &dest) {
-            Err(e) if e.raw_os_error() == Some(libc::EMSGSIZE) => {
-                hi = mid - 1;
-                continue;
-            }
-            Err(_) => break,
+            Err(e) if e.raw_os_error() == Some(libc::EMSGSIZE) => return Some(false),
+            Err(_) => return None,
             Ok(_) => {}
         }
-
-        // Wait for echo reply
-        let mut buf = [MaybeUninit::uninit(); 2048];
-        if wait_for_reply(&socket, &mut buf, IDENT, seq) {
-            result = Some(mid);
-            lo = mid + 1;
-        } else {
-            // Timeout: could be PMTU drop (no EMSGSIZE yet) or loss — treat as too big
-            hi = mid - 1;
-        }
-    }
-
-    result
+        // Timeout treated as too big (PMTU drop without EMSGSIZE yet, or loss)
+        if wait_for_reply(&socket, &mut buf, IDENT, seq) { Some(true) } else { Some(false) }
+    })
 }
 
 /// Build an ICMP echo request. Total on-wire IP payload = 8 (ICMP hdr) + data.
