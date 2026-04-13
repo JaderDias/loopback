@@ -19,7 +19,7 @@ const THIRTY_DAYS_MICROS: u128 = 30 * 24 * 60 * 60 * 1_000_000;
 fn cutoff_micros() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
+        .unwrap_or_default()
         .as_micros()
         .saturating_sub(THIRTY_DAYS_MICROS)
 }

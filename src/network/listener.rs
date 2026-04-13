@@ -14,6 +14,7 @@ const SEEN_WINDOW: usize = 10_000;
 
 pub async fn start_listener(
     port: u16,
+    session_id: u32,
     sent_counter: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<Packet>>>,
 ) {
@@ -53,12 +54,18 @@ pub async fn start_listener(
 
         let counter = cursor.read_u64::<BigEndian>().unwrap_or_default();
         let timestamp = cursor.read_u128::<BigEndian>().unwrap_or_default();
-        // Size field added in new payload format (offset 24, 4 bytes)
         let recv_size = cursor.read_u32::<BigEndian>().unwrap_or(0);
+        let recv_session = cursor.read_u32::<BigEndian>().unwrap_or(0);
+
+        // Discard packets from a previous process run. They carry a different
+        // session_id and would corrupt reorder detection by inflating max_seen_seq.
+        if recv_session != session_id {
+            continue;
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
+            .unwrap_or_default()
             .as_micros();
         let latency = (now as i128 - timestamp as i128).max(0) as u64;
 
@@ -84,11 +91,14 @@ pub async fn start_listener(
             }
         }
 
-        // Locate this packet in the history queue by age
+        // Locate this packet in the history queue by age.
+        // Lock the queue FIRST, then read sent_counter. Because the sender now
+        // increments the counter and pushes to the queue under the same lock,
+        // we see a consistent snapshot: queue.len() corresponds to sent_counter.
+        let mut queue = history.lock().await;
         let sent = sent_counter.load(Ordering::Relaxed);
         let age = sent.saturating_sub(counter) as usize;
 
-        let mut queue = history.lock().await;
         if let Some(index) = queue.len().checked_sub(age) {
             if let Some(packet) = queue.get_mut(index) {
                 if is_duplicate {

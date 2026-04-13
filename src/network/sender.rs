@@ -14,6 +14,7 @@ use crate::model::Packet;
 pub async fn start_sending(
     config: &crate::config::Config,
     public_ip: String,
+    session_id: u32,
     sent_counter: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<Packet>>>,
 ) {
@@ -90,20 +91,22 @@ pub async fn start_sending(
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
+            .unwrap_or_default()
             .as_micros();
 
-        let counter = sent_counter.fetch_add(1, Ordering::Relaxed);
-
+        // Increment counter and push to history atomically under the same lock,
+        // so the listener can rely on: queue.len() == sent_counter at all times.
+        let counter;
         {
             let mut queue = history.lock().await;
             if queue.len() >= config.max_queue_size {
                 queue.pop_front();
             }
+            counter = sent_counter.fetch_add(1, Ordering::Relaxed);
             queue.push_back(Packet::pending(timestamp, size));
         }
 
-        let payload = build_payload(counter, timestamp, size);
+        let payload = build_payload(counter, timestamp, size, session_id);
         socket.send_to(&payload, &address).unwrap_or_else(|e| {
             eprintln!("Failed to send packet: {}", e);
             0
@@ -111,16 +114,18 @@ pub async fn start_sending(
     }
 }
 
-/// Payload layout (28 bytes header + padding):
-///   [0..8]   counter   u64 big-endian
-///   [8..24]  timestamp u128 big-endian
-///   [24..28] size      u32 big-endian  ← new field for MTU tracking
-///   [28..]   zero padding
-fn build_payload(counter: u64, timestamp: u128, size: u32) -> Vec<u8> {
+/// Payload layout (32 bytes header + padding):
+///   [0..8]   counter    u64 big-endian
+///   [8..24]  timestamp  u128 big-endian
+///   [24..28] size       u32 big-endian
+///   [28..32] session_id u32 big-endian  ← prevents stale packets from a prior run
+///   [32..]   zero padding
+fn build_payload(counter: u64, timestamp: u128, size: u32, session_id: u32) -> Vec<u8> {
     let mut payload = vec![0u8; size as usize];
     let mut cursor = Cursor::new(&mut payload);
     cursor.write_u64::<BigEndian>(counter).unwrap();
     cursor.write_u128::<BigEndian>(timestamp).unwrap();
     cursor.write_u32::<BigEndian>(size).unwrap();
+    cursor.write_u32::<BigEndian>(session_id).unwrap();
     payload
 }

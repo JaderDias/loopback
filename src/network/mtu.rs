@@ -8,7 +8,7 @@ use tokio::time;
 fn now_micros() -> u128 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_micros()
 }
 
@@ -160,7 +160,9 @@ fn probe_icmp_blocking(ip: Ipv4Addr, min: u32, max: u32, seq_base: u16) -> Optio
     use std::mem::MaybeUninit;
     use std::os::unix::io::AsRawFd;
 
-    let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).ok()?;
+    let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))
+        .map_err(|e| eprintln!("ICMP MTU probe: cannot create raw socket (missing CAP_NET_RAW?): {}", e))
+        .ok()?;
     socket.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
 
     // Set DF bit — the whole point of this implementation

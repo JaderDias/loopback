@@ -8,6 +8,7 @@ use dotenvy::dotenv;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use model::Packet;
@@ -17,6 +18,15 @@ use web::PingSource;
 async fn main() {
     dotenv().ok();
     let config = config::load();
+
+    // Random-ish session ID: low 32 bits of the startup timestamp in microseconds.
+    // Prevents stale in-flight packets from a previous run (which carry a different
+    // session ID) from being matched against the new run's history.
+    let session_id: u32 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u32;
+    println!("Session ID: 0x{:08X}", session_id);
 
     let sent_counter = Arc::new(AtomicU64::new(0));
 
@@ -47,7 +57,13 @@ async fn main() {
         let sent_counter = Arc::clone(&sent_counter);
         let history = Arc::clone(&history);
         tokio::spawn(async move {
-            network::listener::start_listener(config.target_port, sent_counter, history).await;
+            network::listener::start_listener(
+                config.target_port,
+                session_id,
+                sent_counter,
+                history,
+            )
+            .await;
         });
     }
 
@@ -58,40 +74,42 @@ async fn main() {
         let loopback_mtu = Arc::clone(&loopback_mtu);
         let config = config.clone();
         tokio::spawn(async move {
-            match network::ip::discover(config.alternative_interface.as_deref()).await {
-                Some(public_ip) => {
-                    // MTU probe runs in parallel with the sender
-                    let bind_addr = if config.alternative_interface.is_some() {
-                        // Re-derive bind addr (simplified: use 0.0.0.0 for probe)
-                        "0.0.0.0:0".to_string()
-                    } else {
-                        "0.0.0.0:0".to_string()
-                    };
-                    let address = format!("{}:{}", public_ip, config.target_port);
-                    {
-                        let loopback_mtu = Arc::clone(&loopback_mtu);
-                        let bind = bind_addr.clone();
-                        let addr = address.clone();
-                        let min_mtu = config.min_mtu;
-                        let max_mtu = config.max_mtu;
-                        let max_queue_size = config.max_queue_size;
-                        tokio::spawn(async move {
-                            network::mtu::start_probing_udp(
-                                bind,
-                                addr,
-                                min_mtu,
-                                max_mtu,
-                                max_queue_size,
-                                loopback_mtu,
-                            )
-                            .await;
-                        });
+            let public_ip = loop {
+                match network::ip::discover(config.alternative_interface.as_deref()).await {
+                    Some(ip) => break ip,
+                    None => {
+                        eprintln!("Could not determine public IP, retrying in 30s...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
                     }
-                    network::sender::start_sending(&config, public_ip, sent_counter, history)
-                        .await;
                 }
-                None => eprintln!("Loopback sender disabled: could not determine public IP."),
+            };
+            let address = format!("{}:{}", public_ip, config.target_port);
+            {
+                let loopback_mtu = Arc::clone(&loopback_mtu);
+                let addr = address.clone();
+                let min_mtu = config.min_mtu;
+                let max_mtu = config.max_mtu;
+                let max_queue_size = config.max_queue_size;
+                tokio::spawn(async move {
+                    network::mtu::start_probing_udp(
+                        "0.0.0.0:0".to_string(),
+                        addr,
+                        min_mtu,
+                        max_mtu,
+                        max_queue_size,
+                        loopback_mtu,
+                    )
+                    .await;
+                });
             }
+            network::sender::start_sending(
+                &config,
+                public_ip,
+                session_id,
+                sent_counter,
+                history,
+            )
+            .await;
         });
     }
 

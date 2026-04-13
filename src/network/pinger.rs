@@ -51,7 +51,7 @@ pub async fn start_pinging(
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
+            .unwrap_or_default()
             .as_micros();
 
         let latency = match pinger.ping(PingSequence(seq), &payload).await {
