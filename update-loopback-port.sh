@@ -10,10 +10,18 @@ if [[ ! "$PORT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Update firewall: replace old loopback UDP rule with new port
-sudo sed -i "/--dport .* -j ACCEPT.*LOOPBACK_VPN/d" /etc/iptables/rules.v4
-sudo sed -i "/--dport 8124 -j ACCEPT/a -A INPUT -p udp -m udp --dport $PORT -j ACCEPT -m comment --comment LOOPBACK_VPN" /etc/iptables/rules.v4
-sudo iptables-restore < /etc/iptables/rules.v4
+# Update live iptables rules.
+# Delete all existing LOOPBACK_VPN rules (by line number, high-to-low to preserve indices),
+# then add the new one. This avoids the shell-redirect sudo issue that made
+# `sudo iptables-restore < file` fail with "Permission denied".
+OLD_RULES=$(sudo iptables -L INPUT -n --line-numbers | awk '/LOOPBACK_VPN/{print $1}' | sort -rn)
+for RULE_NUM in $OLD_RULES; do
+    sudo iptables -D INPUT "$RULE_NUM"
+done
+sudo iptables -A INPUT -p udp -m udp --dport "$PORT" -j ACCEPT -m comment --comment LOOPBACK_VPN
+
+# Persist the updated live rules for next boot
+sudo sh -c 'iptables-save > /etc/iptables/rules.v4'
 echo "Firewall updated for UDP port $PORT"
 
 systemctl --user restart loopback
