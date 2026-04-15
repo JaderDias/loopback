@@ -51,39 +51,40 @@ pub async fn start_probing_udp(
     }
 }
 
-/// Binary-search for the maximum fitting MTU in [min, max], stepping by 2 (even only).
+/// Binary-search for the maximum fitting MTU in [min, max], stepping by 4 bytes.
 /// `probe` returns Some(true)=fits, Some(false)=too big, None=abort.
 fn binary_search_mtu(min: u32, max: u32, mut probe: impl FnMut(u32) -> Option<bool>) -> Option<u32> {
-    let mut lo = (min + 1) & !1; // round up to even
-    let mut hi = max & !1;       // round down to even
+    let mut lo = (min + 3) & !3; // round up to multiple of 4
+    let mut hi = max & !3;       // round down to multiple of 4
     let mut result = None;
     while lo <= hi {
-        let mid = ((lo + hi) / 2) & !1;
+        let mid = ((lo + hi) / 2) & !3;
         match probe(mid) {
-            Some(true)  => { result = Some(mid); lo = mid + 2; }
-            Some(false) => { hi = mid.saturating_sub(2); }
+            Some(true)  => { result = Some(mid); lo = mid + 4; }
+            Some(false) => { hi = mid.saturating_sub(4); }
             None        => break,
         }
     }
     result
 }
 
-/// Try special well-known MTU values before falling back to binary search.
-/// Order: 9000 (jumbo) → 1472 → 1512 → binary search in remaining range.
+/// Use 1472 and 1512 as checkpoints to narrow the binary search range.
+/// Only 9000 short-circuits; every other path ends in binary search.
 fn probe_mtu(min: u32, max: u32, mut probe: impl FnMut(u32) -> Option<bool>) -> Option<u32> {
     if matches!(probe(9000), Some(true)) {
         return Some(9000);
     }
     match probe(1472) {
         None        => return None,
-        Some(false) => return binary_search_mtu(min, 1470, probe),
+        Some(false) => return binary_search_mtu(min, 1468, probe),
         Some(true)  => {}
     }
-    let upper = max & !1;
     match probe(1512) {
-        Some(true) => Some(1512),
-        _          => binary_search_mtu(1474, upper.min(1510), &mut probe).or(Some(1472)),
+        None        => return Some(1472),
+        Some(false) => return binary_search_mtu(1476, 1508, &mut probe).or(Some(1472)),
+        Some(true)  => {}
     }
+    binary_search_mtu(1516, 8996, &mut probe).or(Some(1512))
 }
 
 fn probe_udp_blocking(bind_addr: &str, address: &str, min: u32, max: u32) -> Option<u32> {

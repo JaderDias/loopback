@@ -23,26 +23,28 @@ pub async fn start_sending(
     // back through the VPN tunnel → listener). Binding to the VPN IP would make packets
     // travel through the tunnel to the server, which does not hairpin them back.
     if let Some(iface_name) = &config.alternative_interface {
-        let interfaces = datalink::interfaces();
-        match interfaces.into_iter().find(|iface| &iface.name == iface_name) {
-            Some(iface) => {
-                let ip_str = iface
-                    .ips
-                    .iter()
-                    .find_map(|ip| match ip.ip() {
-                        IpAddr::V4(v4) => Some(v4.to_string()),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| "?".to_string());
-                println!("VPN interface {} ({}) is up; sender will egress via default route.", iface_name, ip_str);
-            }
-            None => {
-                eprintln!(
-                    "Interface '{}' not found (loopback sender disabled). \
-                     ICMP ping will continue as fallback.",
-                    iface_name
-                );
-                return;
+        loop {
+            let interfaces = datalink::interfaces();
+            match interfaces.into_iter().find(|iface| &iface.name == iface_name) {
+                Some(iface) => {
+                    let ip_str = iface
+                        .ips
+                        .iter()
+                        .find_map(|ip| match ip.ip() {
+                            IpAddr::V4(v4) => Some(v4.to_string()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+                    println!("VPN interface {} ({}) is up; sender will egress via default route.", iface_name, ip_str);
+                    break;
+                }
+                None => {
+                    eprintln!(
+                        "Interface '{}' not found, retrying in 30s...",
+                        iface_name
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                }
             }
         }
     }
