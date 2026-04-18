@@ -12,7 +12,7 @@ pub struct Config {
     pub ping_data_file: String,
     pub ping_targets: Vec<String>,
     pub target_port: u16,
-    pub web_port: u16,
+    pub mimir_url: String,
 }
 
 impl Config {
@@ -99,9 +99,7 @@ pub fn load() -> Config {
             .parse()
             .expect("INTERVAL_MILLIS must be a number"),
         target_port: read_target_port(),
-        web_port: env::var("WEB_PORT")
-            .expect("WEB_PORT must be set")
-            .parse()
-            .expect("WEB_PORT must be a number"),
+        mimir_url: env::var("MIMIR_URL")
+            .unwrap_or_else(|_| "http://localhost:9009/api/v1/push".to_string()),
     }
 }

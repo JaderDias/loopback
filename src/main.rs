@@ -1,8 +1,8 @@
 mod config;
+mod metrics;
 mod model;
 mod network;
 mod persistence;
-mod web;
 
 use dotenvy::dotenv;
 use std::collections::VecDeque;
@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
+use metrics::PingSource;
 use model::Packet;
-use web::PingSource;
 
 #[tokio::main]
 async fn main() {
@@ -148,14 +148,14 @@ async fn main() {
         });
     }
 
-    // ── Web server ────────────────────────────────────────────────────────────
+    // ── Mimir push ────────────────────────────────────────────────────────────
     {
         let history = Arc::clone(&history);
         let loopback_mtu = Arc::clone(&loopback_mtu);
         let ping_sources = ping_sources.clone();
-        let web_port = config.web_port;
+        let mimir_url = config.mimir_url.clone();
         tokio::spawn(async move {
-            web::serve(web_port, history, loopback_mtu, ping_sources).await;
+            metrics::start_push_loop(mimir_url, history, loopback_mtu, ping_sources).await;
         });
     }
 

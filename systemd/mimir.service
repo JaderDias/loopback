@@ -1,0 +1,11 @@
+[Unit]
+Description=Grafana Mimir
+After=network.target
+
+[Service]
+ExecStart=%h/opt/mimir -config.file=%h/opt/mimir.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

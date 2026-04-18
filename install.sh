@@ -30,6 +30,22 @@ if [ ! -f "$OPT_DIR/loopback.env" ]; then
     echo "Created $OPT_DIR/loopback.env from example — edit it before starting."
 fi
 
+# ── Mimir ─────────────────────────────────────────────────────────────────────
+MIMIR_BIN="${OPT_DIR}/mimir"
+if [ ! -f "$MIMIR_BIN" ]; then
+    echo "Downloading Mimir..."
+    MIMIR_VERSION=$(curl -sf https://api.github.com/repos/grafana/mimir/releases/latest \
+        | grep '"tag_name"' | sed 's/.*"mimir-\(.*\)".*/\1/')
+    curl -L "https://github.com/grafana/mimir/releases/download/mimir-${MIMIR_VERSION}/mimir-linux-arm64" \
+        -o "$MIMIR_BIN"
+    chmod +x "$MIMIR_BIN"
+fi
+
+cp "$SCRIPT_DIR/mimir/mimir.yaml" "$OPT_DIR/mimir.yaml"
+mkdir -p "${HOME}/var/mimir"
+
+cp "$SCRIPT_DIR/systemd/mimir.service" "$SYSTEMD_DIR/"
+
 # ── Build ──────────────────────────────────────────────────────────────────────
 echo "Building loopback..."
 cd "$SCRIPT_DIR"
@@ -53,12 +69,10 @@ cp "$SCRIPT_DIR/systemd/loopback-port-update.path" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/systemd/loopback-port-update.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/systemd/protonvpn-portforward.service" "$SYSTEMD_DIR/"
 
-# Install loopback.service if not already present
-if [ ! -f "$SYSTEMD_DIR/loopback.service" ]; then
-    cat > "$SYSTEMD_DIR/loopback.service" <<EOF
+cat > "$SYSTEMD_DIR/loopback.service" <<EOF
 [Unit]
 Description=Uptime Monitoring Tool
-After=network.target
+After=network.target mimir.service
 
 [Service]
 ExecStart=$OPT_DIR/loopback
@@ -68,13 +82,25 @@ EnvironmentFile=$OPT_DIR/loopback.env
 [Install]
 WantedBy=default.target
 EOF
+
+# ── Firewall ───────────────────────────────────────────────────────────────────
+# Remove stale web-dashboard rule (port 8124, replaced by Mimir).
+OLD_WEB=$(sudo iptables -L INPUT -n --line-numbers | awk '/dpt:8124/{print $1}' | sort -rn)
+for RULE_NUM in $OLD_WEB; do sudo iptables -D INPUT "$RULE_NUM"; done
+
+# Allow Grafana (192.168.5.2) to reach Mimir (port 9009) — idempotent.
+if ! sudo iptables -L INPUT -n | grep -q MIMIR; then
+    sudo iptables -I INPUT -s 192.168.5.2 -p tcp --dport 9009 -j ACCEPT -m comment --comment MIMIR
 fi
+
+sudo sh -c 'iptables-save > /etc/iptables/rules.v4'
 
 # ── Linger (start user services at boot without login) ─────────────────────────
 loginctl enable-linger "$USER"
 
 # ── Enable and start ───────────────────────────────────────────────────────────
 systemctl --user daemon-reload
+systemctl --user enable --now mimir.service
 systemctl --user enable --now loopback.service
 systemctl --user enable --now loopback-port-update.path
 
