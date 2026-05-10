@@ -24,4 +24,4 @@ sudo iptables -A INPUT -p udp -m udp --dport "$PORT" -j ACCEPT -m comment --comm
 sudo sh -c 'iptables-save > /etc/iptables/rules.v4'
 echo "Firewall updated for UDP port $PORT"
 
-systemctl --user restart loopback
+systemctl --user restart --no-block loopback

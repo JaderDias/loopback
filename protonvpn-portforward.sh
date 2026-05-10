@@ -22,6 +22,9 @@ while true; do
         if [ "$port" != "$current" ]; then
             echo "Port forwarding: $port"
             echo "$port" > "$PORT_FILE"
+            # Explicitly trigger the update instead of relying solely on the path unit,
+            # which can miss inotify events when the service is mid-transition.
+            systemctl --user start loopback-port-update.service
         fi
     else
         echo "natpmpc failed: $result" >&2
